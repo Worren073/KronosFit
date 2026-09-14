@@ -1,0 +1,13 @@
+{
+  "name": "kronosfit",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@8.15.9",
+  "scripts": {
+    "dev:web": "pnpm --filter kronosfit-web dev",
+    "build:web": "pnpm --filter kronosfit-web build",
+    "lint:web": "pnpm --filter kronosfit-web lint",
+    "typecheck:web": "pnpm --filter kronosfit-web typecheck"
+  },
+  "devDependencies": {}
+}
