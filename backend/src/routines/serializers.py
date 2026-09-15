@@ -28,8 +28,8 @@ class RoutineSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Routine
-        fields = ['id', 'name', 'focus', 'days_per_week', 'estimated_duration_minutes', 'generated_by_ai', 'created_at', 'days']
-        read_only_fields = ['generated_by_ai', 'created_at']
+        fields = ['id', 'name', 'focus', 'days_per_week', 'estimated_duration_minutes', 'source', 'created_at', 'days']
+        read_only_fields = ['source', 'created_at']
 
     @transaction.atomic
     def create(self, validated_data):

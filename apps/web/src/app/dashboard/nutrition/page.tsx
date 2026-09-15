@@ -24,6 +24,7 @@ import {
 } from "@/lib/api";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { FadeIn } from "@/components/ui/FadeIn";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { useMinimumSkeleton } from "@/hooks/useMinimumSkeleton";
 import type { Meal, WaterIntake, MealSummary } from "@/lib/types";
 
@@ -34,6 +35,12 @@ function todayStr(): string {
 function parseDate(raw: string | null): string {
   if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
   return todayStr();
+}
+
+interface PendingAction {
+  title: string;
+  message: React.ReactNode;
+  action: () => Promise<void>;
 }
 
 export default function NutritionPage() {
@@ -61,6 +68,7 @@ function NutritionContent() {
   const [mealForm, setMealForm] = useState({ name: "", calories: "", protein_grams: "", carbs_grams: "", fat_grams: "" });
   const [mealError, setMealError] = useState("");
   const [waterForm, setWaterForm] = useState({ milliliters: "250" });
+  const [confirm, setConfirm] = useState<PendingAction | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -142,9 +150,27 @@ function NutritionContent() {
   };
 
   const handleDeleteMeal = async (id: number) => {
-    if (!confirm("¿Eliminar esta comida?")) return;
     await deleteMeal(id);
     reloadDay(date);
+  };
+
+  const requestDeleteMeal = (m: Meal) => {
+    setConfirm({
+      title: "Eliminar comida",
+      message: (
+        <>
+          ¿Eliminar <span className="font-bold text-white">«{m.name}»</span>? Esta acción no se
+          puede deshacer.
+        </>
+      ),
+      action: () => handleDeleteMeal(m.id),
+    });
+  };
+
+  const runConfirm = async () => {
+    if (!confirm) return;
+    await confirm.action();
+    setConfirm(null);
   };
 
   const handleAddWater = async (e: React.FormEvent) => {
@@ -282,7 +308,7 @@ function NutritionContent() {
                   <button onClick={() => handleEditMeal(m)} className="p-2 rounded-xl hover:bg-white/5 text-zinc-300">
                     <PencilIcon className="w-4 h-4" />
                   </button>
-                  <button onClick={() => handleDeleteMeal(m.id)} className="p-2 rounded-xl hover:bg-red-500/10 text-zinc-300 hover:text-red-400">
+                  <button onClick={() => requestDeleteMeal(m)} className="p-2 rounded-xl hover:bg-red-500/10 text-zinc-300 hover:text-red-400">
                     <TrashIcon className="w-4 h-4" />
                   </button>
                 </div>
@@ -323,6 +349,14 @@ function NutritionContent() {
           {water.length === 0 && <p className="text-zinc-500 text-center py-4">No hay registros de agua en esta fecha.</p>}
         </div>
       </FadeIn>
+
+      <ConfirmModal
+        open={confirm !== null}
+        title={confirm?.title ?? ""}
+        message={confirm?.message ?? ""}
+        onConfirm={runConfirm}
+        onClose={() => setConfirm(null)}
+      />
     </div>
   );
 }

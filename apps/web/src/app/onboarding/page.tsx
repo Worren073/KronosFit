@@ -51,6 +51,14 @@ export default function OnboardingPage() {
   useEffect(() => {
     getCurrentUser()
       .then((u) => {
+        if (u.is_superuser) {
+          router.push("/dashboard/superadmin");
+          return;
+        }
+        if (u.role === "gym_admin") {
+          router.push("/dashboard/gyms");
+          return;
+        }
         if (u.profile?.is_complete) {
           router.push("/dashboard");
           return;

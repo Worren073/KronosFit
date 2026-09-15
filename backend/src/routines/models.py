@@ -3,12 +3,19 @@ from django.conf import settings
 
 
 class Routine(models.Model):
+    class Source(models.TextChoices):
+        AI = 'ai', 'IA'
+        SELF = 'self', 'Creado por ti'
+        TRAINER = 'trainer', 'Asignado por entrenador'
+
+    MAX_PER_USER = 5
+
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='routines')
     name = models.CharField(max_length=255)
     focus = models.CharField(max_length=255)
     days_per_week = models.PositiveIntegerField()
     estimated_duration_minutes = models.PositiveIntegerField()
-    generated_by_ai = models.BooleanField(default=True)
+    source = models.CharField(max_length=20, choices=Source.choices, default=Source.SELF)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

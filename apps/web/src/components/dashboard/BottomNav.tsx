@@ -4,20 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
 import { useDashboardStore } from "@/stores/dashboardStore";
-import { getPortalNavItems } from "@/lib/navigation";
+import { getPortalNavItems, getActiveNavItem } from "@/lib/navigation";
 
 export function BottomNav() {
   const pathname = usePathname();
   const { user } = useDashboardStore();
 
   const navItems = getPortalNavItems(user);
-
-  const isActiveFor = (item: { href: string }) =>
-    item.href === "/dashboard"
-      ? pathname === "/dashboard"
-      : pathname === item.href || pathname.startsWith(`${item.href}/`);
-
-  const activeIndex = navItems.findIndex(isActiveFor);
+  const activeHref = getActiveNavItem(pathname, navItems)?.href ?? null;
 
   return (
     <nav
@@ -25,27 +19,26 @@ export function BottomNav() {
       style={{ bottom: "calc(env(safe-area-inset-bottom) + 1rem)" }}
     >
       <ul className="relative flex items-center justify-around">
-        <motion.div
-          className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-16 h-16 rounded-2xl gold-gradient shadow-lg shadow-amber-500/30"
-          initial={false}
-          animate={{
-            left: `${(activeIndex / navItems.length) * 100 + 100 / (navItems.length * 2)}%`,
-          }}
-          transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        />
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive = isActiveFor(item);
+          const isActive = activeHref === item.href;
           return (
-            <li key={item.href} className="relative z-10 flex-1">
+            <li key={item.href} className="relative flex-1">
               <Link
                 href={item.href}
-                className={`flex flex-col items-center gap-1 py-2 transition-colors ${
+                className={`relative flex flex-col items-center gap-1 py-2 rounded-2xl transition-colors ${
                   isActive ? "text-black" : "text-zinc-400"
                 }`}
               >
-                <Icon className="w-6 h-6" />
-                <span className="text-[10px] font-medium">{item.label}</span>
+                {isActive && (
+                  <motion.div
+                    layoutId="nav-active-bottombar"
+                    className="absolute inset-0 rounded-2xl gold-gradient shadow-lg shadow-amber-500/30"
+                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                  />
+                )}
+                <Icon className="w-6 h-6 relative z-10" />
+                <span className="text-[10px] font-medium relative z-10">{item.label}</span>
               </Link>
             </li>
           );

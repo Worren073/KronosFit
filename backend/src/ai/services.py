@@ -50,6 +50,7 @@ def _send_chat_with_retry(
     model: str,
     history: List[types.Content],
     last_message: str,
+    system_prompt: str,
 ) -> types.GenerateContentResponse:
     """Send a chat message with retries on server errors."""
     last_error: Exception | None = None
@@ -59,7 +60,7 @@ def _send_chat_with_retry(
                 model=model,
                 history=history,
                 config=types.GenerateContentConfig(
-                    system_instruction=TRAINER_SYSTEM_PROMPT,
+                    system_instruction=system_prompt,
                     temperature=0.7,
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                 ),
@@ -72,12 +73,16 @@ def _send_chat_with_retry(
     raise last_error or RuntimeError(f'El modelo {model} no respondio despues de {MAX_RETRIES} intentos.')
 
 
-def chat_with_trainer(messages: List[Dict[str, str]]) -> str:
+def chat_with_trainer(messages: List[Dict[str, str]], workout_history: str = '') -> str:
     """Send a conversation to Gemini using chat sessions and return the assistant reply."""
     client = _get_client()
 
     if not messages:
         return ''
+
+    system_prompt = TRAINER_SYSTEM_PROMPT
+    if workout_history:
+        system_prompt += f'\n\nHistorial de entrenamiento del atleta (usa estos datos para asesorar sobre cargas y progresión):\n{workout_history}'
 
     history = _contents_from_messages(messages[:-1])
     last_message = messages[-1].get('content', '')
@@ -86,7 +91,7 @@ def chat_with_trainer(messages: List[Dict[str, str]]) -> str:
 
     for model in models:
         try:
-            response = _send_chat_with_retry(client, model, history, last_message)
+            response = _send_chat_with_retry(client, model, history, last_message, system_prompt)
             return response.text.strip()
         except errors.ServerError as exc:
             last_error = exc

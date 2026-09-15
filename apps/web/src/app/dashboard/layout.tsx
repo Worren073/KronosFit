@@ -35,7 +35,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     fetchUser()
       .then((u) => {
-        if (u && !u.is_superuser && !u.profile?.is_complete && pathname !== "/onboarding") {
+        if (u && !u.is_superuser && u.role !== "gym_admin" && !u.profile?.is_complete && pathname !== "/onboarding") {
           router.push("/onboarding");
         }
       })

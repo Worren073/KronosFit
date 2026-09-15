@@ -5,8 +5,6 @@ import {
   BuildingStorefrontIcon,
   ChevronDownIcon,
   ArrowRightOnRectangleIcon,
-  CheckCircleIcon,
-  TicketIcon,
   CalendarDaysIcon,
   UserGroupIcon,
   TrophyIcon,
@@ -19,32 +17,20 @@ import {
   checkIn,
   getGymAthletes,
   getAthleteDashboard,
-  getGymAdminDashboard,
-  createGymSubscription,
-  updateGymSubscription,
-  kickMember,
-  getGymEvents,
-  createGymEvent,
-  deleteGymEvent,
-  getGymPlans,
-  createGymPlan,
-  deleteGymPlan,
-  updateGymMember,
   ApiError,
 } from "@/lib/api";
 import { FadeIn } from "@/components/ui/FadeIn";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { useMinimumSkeleton } from "@/hooks/useMinimumSkeleton";
 import { useDashboardStore } from "@/stores/dashboardStore";
+import GymDashboard from "@/components/dashboard/gyms/GymDashboard";
 import type {
   Gym,
   MyGymData,
   TrainerAthlete,
   AthleteDashboard,
-  GymAdminDashboard,
   GymEvent,
-  GymPlan,
-  GymMembership,
 } from "@/lib/types";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -59,6 +45,14 @@ const ROLE_STYLES: Record<string, string> = {
   admin: "bg-amber-500/20 text-amber-400",
 };
 
+interface PendingAction {
+  title: string;
+  message: React.ReactNode;
+  action: () => Promise<void>;
+  danger?: boolean;
+  confirmLabel?: string;
+}
+
 export default function GymsPage() {
   const ready = useMinimumSkeleton(500);
   const { user } = useDashboardStore();
@@ -68,8 +62,10 @@ export default function GymsPage() {
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
 
-  const [joinSlug, setJoinSlug] = useState("");
+const [joinSlug, setJoinSlug] = useState("");
   const [joining, setJoining] = useState(false);
+  const [confirm, setConfirm] = useState<PendingAction | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   const notify = useCallback((msg: string) => {
     setToast(msg);
@@ -131,11 +127,36 @@ export default function GymsPage() {
     }
   };
 
-  const handleLeave = async () => {
-    if (!data?.membership || !confirm("¿Salir de este gimnasio?")) return;
-    await leaveGym(data.membership.id);
-    notify("Saliste del gimnasio.");
-    await reload();
+const doLeave = async () => {
+    if (!data?.membership) return;
+    setConfirmBusy(true);
+    try {
+      await leaveGym(data.membership.id);
+      notify("Saliste del gimnasio.");
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo salir del gimnasio");
+    } finally {
+      setConfirmBusy(false);
+    }
+  };
+
+  const handleLeave = () => {
+    if (!data?.membership) return;
+    setConfirm({
+      title: "Salir del gimnasio",
+      message:
+        "¿Querés salir de este gimnasio? Perderás el acceso hasta que vuelvas a unirte con el código.",
+      danger: false,
+      confirmLabel: "Salir",
+      action: doLeave,
+    });
+  };
+
+  const runConfirm = async () => {
+    if (!confirm) return;
+    await confirm.action();
+    setConfirm(null);
   };
 
   return (
@@ -166,16 +187,27 @@ export default function GymsPage() {
           joining={joining}
         />
       ) : roles.is_admin || globalGymAdmin ? (
-        <GymAdminPortal slug={slug} notify={notify} onChanged={() => reload(true)} />
+        <GymDashboard gym={gym as Gym} />
       ) : roles.is_trainer ? (
         <TrainerPortal slug={slug} notify={notify} />
       ) : (
-        <MemberPortal
+<MemberPortal
           data={data as MyGymData}
           onLeave={handleLeave}
           notify={notify}
         />
       )}
+
+      <ConfirmModal
+        open={confirm !== null}
+        title={confirm?.title ?? ""}
+        message={confirm?.message ?? ""}
+        confirmLabel={confirm?.confirmLabel}
+        danger={confirm?.danger}
+        busy={confirmBusy}
+        onConfirm={runConfirm}
+        onClose={() => setConfirm(null)}
+      />
     </div>
   );
 }
@@ -483,377 +515,6 @@ function AthleteDetail({ data }: { data: AthleteDashboard }) {
           <p className="text-lg font-bold text-white mt-1">{card.value}</p>
         </div>
       ))}
-    </div>
-  );
-}
-
-function GymAdminPortal({
-  slug,
-  notify,
-  onChanged,
-}: {
-  slug: string;
-  notify: (msg: string) => void;
-  onChanged: () => void;
-}) {
-  const [dashboard, setDashboard] = useState<GymAdminDashboard | null>(null);
-  const [events, setEvents] = useState<GymEvent[] | null>(null);
-  const [plans, setPlans] = useState<GymPlan[] | null>(null);
-  const [error, setError] = useState("");
-  const [openManage, setOpenManage] = useState(false);
-
-  const [eventForm, setEventForm] = useState({ title: "", description: "", starts_at: "" });
-  const [planForm, setPlanForm] = useState({ name: "", price: "", duration_days: "30" });
-  const [subForm, setSubForm] = useState<{ user: string; plan: string }>({ user: "", plan: "" });
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    Promise.all([getGymAdminDashboard(slug), getGymEvents(slug), getGymPlans(slug)])
-      .then(([d, e, p]) => {
-        setDashboard(d);
-        setEvents(e);
-        setPlans(p);
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo cargar el panel de gestión"));
-  }, [slug]);
-
-  const createSubscription = async () => {
-    if (!subForm.user) return;
-    setBusy(true);
-    setError("");
-    try {
-      await createGymSubscription(slug, {
-        user: Number(subForm.user),
-        ...(subForm.plan ? { plan: Number(subForm.plan) } : {}),
-      });
-      notify("Mensualidad creada.");
-      setSubForm({ user: "", plan: "" });
-      onChanged();
-      const d = await getGymAdminDashboard(slug);
-      setDashboard(d);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo crear la mensualidad");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const renewSub = async (id: number, hasPlan: boolean) => {
-    setBusy(true);
-    setError("");
-    try {
-      await updateGymSubscription(slug, id, "renew", hasPlan ? undefined : 30);
-      notify("Mensualidad renovada.");
-      onChanged();
-      const d = await getGymAdminDashboard(slug);
-      setDashboard(d);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo renovar");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const cancelSub = async (id: number) => {
-    setBusy(true);
-    setError("");
-    try {
-      await updateGymSubscription(slug, id, "cancel");
-      notify("Mensualidad cancelada.");
-      onChanged();
-      const d = await getGymAdminDashboard(slug);
-      setDashboard(d);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo cancelar");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const kick = async (membershipId: number) => {
-    if (!confirm("¿Expulsar a este atleta del gimnasio?")) return;
-    setBusy(true);
-    setError("");
-    try {
-      await kickMember(slug, membershipId);
-      notify("Atleta expulsado.");
-      onChanged();
-      const d = await getGymAdminDashboard(slug);
-      setDashboard(d);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo expulsar");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const changeRole = async (membershipId: number, role: GymMembership["role"]) => {
-    try {
-      await updateGymMember(slug, membershipId, { role });
-      notify("Rol actualizado.");
-      onChanged();
-      const d = await getGymAdminDashboard(slug);
-      setDashboard(d);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo actualizar el rol");
-    }
-  };
-
-  const createEvent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!eventForm.title || !eventForm.starts_at) return;
-    setBusy(true);
-    setError("");
-    try {
-      await createGymEvent(slug, {
-        title: eventForm.title,
-        description: eventForm.description,
-        starts_at: new Date(eventForm.starts_at).toISOString(),
-      });
-      setEventForm({ title: "", description: "", starts_at: "" });
-      notify("Evento creado.");
-      setEvents(await getGymEvents(slug));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo crear el evento");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const removeEvent = async (id: number) => {
-    if (!confirm("¿Eliminar este evento?")) return;
-    await deleteGymEvent(slug, id);
-    notify("Evento eliminado.");
-    setEvents(await getGymEvents(slug));
-  };
-
-  const createPlan = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!planForm.name) return;
-    setBusy(true);
-    setError("");
-    try {
-      await createGymPlan(slug, {
-        name: planForm.name,
-        price: planForm.price || "0.00",
-        duration_days: Number(planForm.duration_days),
-      });
-      setPlanForm({ name: "", price: "", duration_days: "30" });
-      notify("Plan creado.");
-      setPlans(await getGymPlans(slug));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo crear el plan");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const removePlan = async (id: number) => {
-    if (!confirm("¿Eliminar este plan?")) return;
-    try {
-      await deleteGymPlan(slug, id);
-      notify("Plan eliminado.");
-      setPlans(await getGymPlans(slug));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo eliminar el plan");
-    }
-  };
-
-  if (!dashboard) {
-    return (
-      <FadeIn className="glass rounded-3xl p-10 text-center text-zinc-400">
-        {error || "Cargando panel de gestión..."}
-      </FadeIn>
-    );
-  }
-
-  const stats = [
-    { label: "Mensualidades activas", value: dashboard.active_subscriptions },
-    { label: "Vencidas", value: dashboard.expired_subscriptions },
-    { label: "Asistencias hoy", value: dashboard.today_attendance },
-    { label: "Nuevos del mes", value: dashboard.new_members_month },
-    { label: "Atletas", value: dashboard.athletes_count },
-    { label: "Entrenadores", value: dashboard.trainers_count },
-  ];
-
-  return (
-    <div className="space-y-6">
-      {error && (
-        <FadeIn className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-          {error}
-        </FadeIn>
-      )}
-
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        {stats.map((stat, i) => (
-          <FadeIn key={stat.label} delay={i * 0.05} className="glass rounded-2xl p-4">
-            <p className="text-3xl font-black text-white">{stat.value}</p>
-            <p className="text-xs text-zinc-400 mt-1">{stat.label}</p>
-          </FadeIn>
-        ))}
-      </div>
-
-      <FadeIn delay={0.1} className="glass rounded-3xl p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <UserGroupIcon className="w-6 h-6 text-amber-400" />
-            Gestión de atletas
-          </h2>
-          <button
-            onClick={() => setOpenManage(!openManage)}
-            className="flex items-center gap-1 px-4 py-2 rounded-xl border border-zinc-600 text-zinc-300 hover:bg-white/5 text-sm"
-          >
-            Nueva mensualidad
-            <ChevronDownIcon className={`w-4 h-4 transition-transform ${openManage ? "rotate-180" : ""}`} />
-          </button>
-        </div>
-
-        {openManage && (
-          <form onSubmit={(e) => { e.preventDefault(); createSubscription(); }} className="mb-5 grid grid-cols-1 md:grid-cols-3 gap-3 bg-zinc-900/40 rounded-2xl p-4">
-            <select
-              className="input"
-              value={subForm.user}
-              onChange={(e) => setSubForm({ ...subForm, user: e.target.value })}
-              required
-            >
-              <option value="">Seleccionar atleta</option>
-              {dashboard.members.filter((m) => m.role === "member").map((m) => (
-                <option key={m.membership_id} value={m.user.id}>
-                  {m.user.first_name || m.user.username}
-                </option>
-              ))}
-            </select>
-            <select
-              className="input"
-              value={subForm.plan}
-              onChange={(e) => setSubForm({ ...subForm, plan: e.target.value })}
-            >
-              <option value="">Duración: 30 días</option>
-              {(plans || []).map((plan) => (
-                <option key={plan.id} value={plan.id}>
-                  {plan.name} ({plan.duration_days} días - ${plan.price})
-                </option>
-              ))}
-            </select>
-            <button
-              type="submit"
-              disabled={busy}
-              className="px-5 py-2 rounded-xl bg-amber-500/20 text-amber-400 font-bold text-sm hover:bg-amber-500/30 disabled:opacity-50"
-            >
-              Crear
-            </button>
-          </form>
-        )}
-
-        <div className="space-y-2">
-          {dashboard.members.map((member) => (
-            <div key={member.membership_id} className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-zinc-900/50 rounded-xl p-4">
-              <div>
-                <p className="font-semibold text-white">
-                  {member.user.first_name || member.user.username}{" "}
-                  {member.user.last_name || ""}
-                  <span className={`ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${ROLE_STYLES[member.role] || ROLE_STYLES.member}`}>
-                    {ROLE_LABELS[member.role] || member.role}
-                  </span>
-                </p>
-                <p className="text-xs text-zinc-500 mt-1">
-                  {member.subscription
-                    ? `${member.subscription.status === "active" ? "Activa" : "No activa"} · vence ${new Date(member.subscription.end_date).toLocaleDateString()} · ${member.subscription.days_remaining} días restantes`
-                    : "Sin mensualidad"}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <select
-                  value={member.role}
-                  onChange={(e) => changeRole(member.membership_id, e.target.value as GymMembership["role"])}
-                  className="input !py-1.5 !w-auto text-sm"
-                >
-                  {Object.entries(ROLE_LABELS).map(([key, label]) => (
-                    <option key={key} value={key}>{label}</option>
-                  ))}
-                </select>
-                {member.role === "member" && member.subscription?.status === "active" && (
-                  <>
-                    <button onClick={() => cancelSub(member.subscription!.id)} className="px-3 py-2 rounded-xl border border-zinc-600 text-zinc-300 text-xs hover:text-yellow-400">
-                      Cancelar
-                    </button>
-                    <button onClick={() => renewSub(member.subscription!.id, Boolean(member.subscription?.plan))} className="px-3 py-2 rounded-xl border border-zinc-600 text-zinc-300 text-xs hover:text-green-400">
-                      Renovar
-                    </button>
-                  </>
-                )}
-                <button onClick={() => kick(member.membership_id)} className="px-3 py-2 rounded-xl border border-zinc-600 text-zinc-400 text-xs hover:text-red-400">
-                  Expulsar
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </FadeIn>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <FadeIn delay={0.15} className="glass rounded-3xl p-6">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2 mb-4">
-            <CalendarDaysIcon className="w-5 h-5 text-amber-400" />
-            Planes
-          </h2>
-          <form onSubmit={createPlan} className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
-            <input className="input" placeholder="Nombre" value={planForm.name} onChange={(e) => setPlanForm({ ...planForm, name: e.target.value })} required />
-            <input className="input" placeholder="Precio ARS" value={planForm.price} onChange={(e) => setPlanForm({ ...planForm, price: e.target.value })} />
-            <input className="input" type="number" min={1} placeholder="Días" value={planForm.duration_days} onChange={(e) => setPlanForm({ ...planForm, duration_days: e.target.value })} required />
-            <button type="submit" disabled={busy} className="sm:col-span-3 px-4 py-2 rounded-xl bg-amber-500/20 text-amber-400 font-bold text-sm hover:bg-amber-500/30 disabled:opacity-50">
-              Crear plan
-            </button>
-          </form>
-          <div className="space-y-2">
-            {(plans || []).map((plan) => (
-              <div key={plan.id} className="flex items-center justify-between bg-zinc-900/50 rounded-xl p-3">
-                <div>
-                  <p className="text-sm font-semibold text-white">{plan.name}</p>
-                  <p className="text-xs text-zinc-500">{plan.duration_days} días · ${plan.price}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircleIcon className={`w-4 h-4 ${plan.is_active ? "text-green-500" : "text-zinc-600"}`} />
-                  <button onClick={() => removePlan(plan.id)} className="text-xs text-zinc-400 hover:text-red-400">
-                    Eliminar
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </FadeIn>
-
-        <FadeIn delay={0.2} className="glass rounded-3xl p-6">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2 mb-4">
-            <TicketIcon className="w-5 h-5 text-amber-400" />
-            Eventos
-          </h2>
-          <form onSubmit={createEvent} className="space-y-2 mb-4">
-            <input className="input" placeholder="Título" value={eventForm.title} onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })} required />
-            <input className="input" placeholder="Descripción" value={eventForm.description} onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })} />
-            <input className="input" type="datetime-local" value={eventForm.starts_at} onChange={(e) => setEventForm({ ...eventForm, starts_at: e.target.value })} required />
-            <button type="submit" disabled={busy} className="w-full px-4 py-2 rounded-xl bg-amber-500/20 text-amber-400 font-bold text-sm hover:bg-amber-500/30 disabled:opacity-50">
-              Crear evento
-            </button>
-          </form>
-          <div className="space-y-2">
-            {(events || []).slice(0, 12).map((event) => (
-              <div key={event.id} className="flex items-start justify-between bg-zinc-900/50 rounded-xl p-3">
-                <div>
-                  <p className="text-sm font-semibold text-white">{event.title}</p>
-                  <p className="text-xs text-zinc-500">
-                    {new Date(event.starts_at).toLocaleDateString()} ·{" "}
-                    {new Date(event.starts_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                  </p>
-                </div>
-                <button onClick={() => removeEvent(event.id)} className="text-xs text-zinc-400 hover:text-red-400">
-                  Eliminar
-                </button>
-              </div>
-            ))}
-          </div>
-        </FadeIn>
-      </div>
     </div>
   );
 }

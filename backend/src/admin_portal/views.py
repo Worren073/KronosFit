@@ -3,7 +3,7 @@ from datetime import date
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 from rest_framework import viewsets, status
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -17,7 +17,7 @@ from gyms.models import (
     GymEvent,
 )
 from gyms.utils import generate_gym_qr
-from .serializers import AdminUserSerializer, AdminGymSerializer
+from .serializers import AdminUserSerializer, AdminGymSerializer, GymAdminCreateSerializer
 
 User = get_user_model()
 
@@ -105,17 +105,28 @@ class AdminGymViewSet(viewsets.ModelViewSet):
     serializer_class = AdminGymSerializer
     permission_classes = [IsSuperAdmin]
     lookup_field = 'slug'
-    http_method_names = ['get', 'post', 'patch', 'head', 'options']
+    http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
 
     def get_queryset(self):
         return Gym.objects.all()
 
     def perform_create(self, serializer):
+        gym_admin_id = self.request.data.get('gym_admin_id')
+        new_gym_admin = self.request.data.get('new_gym_admin')
+        if gym_admin_id and new_gym_admin:
+            raise ValidationError(
+                'Elegí crear una cuenta nueva o asignar un encargado existente, no ambos.'
+            )
+        admin_serializer = None
+        if isinstance(new_gym_admin, dict):
+            admin_serializer = GymAdminCreateSerializer(data=new_gym_admin)
+            admin_serializer.is_valid(raise_exception=True)
         gym = serializer.save(owner=self.request.user)
         generate_gym_qr(gym, self.request.build_absolute_uri('/'))
-        gym_admin_id = self.request.data.get('gym_admin_id')
         if gym_admin_id:
             self._assign_admin(gym, gym_admin_id)
+        elif admin_serializer is not None:
+            admin_serializer.create(admin_serializer.validated_data, gym=gym)
 
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -127,6 +138,11 @@ class AdminGymViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        gym = self.get_object()
+        User.objects.filter(managed_gym=gym).update(role='user', managed_gym=None)
+        return super().destroy(request, *args, **kwargs)
 
     def _assign_admin(self, gym, gym_admin_id):
         try:

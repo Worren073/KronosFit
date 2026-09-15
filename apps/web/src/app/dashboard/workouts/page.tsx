@@ -12,23 +12,25 @@ import {
   ChevronUpIcon,
   FireIcon,
   SparklesIcon,
+  UserIcon,
+  AcademicCapIcon,
   ClipboardDocumentListIcon,
   PlayIcon,
   ClockIcon,
 } from "@heroicons/react/24/outline";
 import {
-  createWorkout,
-  updateWorkout,
-  deleteWorkout,
+  deleteRoutine,
   getExercises,
-  createExercise,
-  deleteExercise,
   startWorkoutFromRoutineDay,
 } from "@/lib/api";
 import { useDashboardStore } from "@/stores/dashboardStore";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { FadeIn } from "@/components/ui/FadeIn";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { useMinimumSkeleton } from "@/hooks/useMinimumSkeleton";
+import { useActiveWorkout } from "@/hooks/useActiveWorkout";
+import { ResumeWorkoutCard } from "@/components/workouts/ResumeWorkoutCard";
+import { StartSessionModal } from "@/components/workouts/StartSessionModal";
 import type { Workout, Exercise, Routine, RoutineDay } from "@/lib/types";
 
 const DAY_NAMES = [
@@ -63,10 +65,33 @@ export default function WorkoutsPage() {
   } = useDashboardStore();
   const ready = useMinimumSkeleton(500);
   const [tab, setTab] = useState<'workouts' | 'plan'>('plan');
-  const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<Workout | null>(null);
-  const [form, setForm] = useState({ name: "", duration_minutes: "", calories_burned: "", notes: "" });
   const [expanded, setExpanded] = useState<number | null>(null);
+  const { activeWorkout, refresh: refreshActive } = useActiveWorkout();
+  const [pendingStart, setPendingStart] = useState<{ routineId: number; dayId: number } | null>(null);
+  const [starting, setStarting] = useState(false);
+
+  const startSession = async (routineId: number, dayId: number, force = false) => {
+    setStarting(true);
+    try {
+      const workout = await startWorkoutFromRoutineDay(routineId, dayId, force);
+      router.push(`/dashboard/workouts/session?workoutId=${workout.id}`);
+    } catch {
+      alert("No se pudo iniciar la sesión. La rutina o el día ya no existen.");
+      fetchRoutines();
+    } finally {
+      setStarting(false);
+      setPendingStart(null);
+    }
+  };
+
+  const requestStart = (routineId: number, dayId: number, dayPk?: number) => {
+    if (!dayPk) return;
+    if (activeWorkout) {
+      setPendingStart({ routineId, dayId: dayPk });
+    } else {
+      startSession(routineId, dayPk);
+    }
+  };
 
   useEffect(() => {
     if (!workoutsInitialized) fetchWorkouts();
@@ -76,45 +101,7 @@ export default function WorkoutsPage() {
     if (!routinesInitialized) fetchRoutines();
   }, [routinesInitialized, fetchRoutines]);
 
-  const resetForm = () => {
-    setForm({ name: "", duration_minutes: "", calories_burned: "", notes: "" });
-    setEditing(null);
-    setFormOpen(false);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const data = {
-      name: form.name,
-      duration_minutes: Number(form.duration_minutes),
-      calories_burned: form.calories_burned ? Number(form.calories_burned) : null,
-      notes: form.notes,
-    };
-    if (editing) {
-      await updateWorkout(editing.id, data);
-    } else {
-      await createWorkout(data);
-    }
-    resetForm();
-    fetchWorkouts();
-  };
-
-  const handleEdit = (w: Workout) => {
-    setEditing(w);
-    setForm({
-      name: w.name,
-      duration_minutes: String(w.duration_minutes),
-      calories_burned: w.calories_burned ? String(w.calories_burned) : "",
-      notes: w.notes,
-    });
-    setFormOpen(true);
-  };
-
-  const handleDelete = async (id: number) => {
-    if (!confirm("¿Eliminar este entrenamiento?")) return;
-    await deleteWorkout(id);
-    fetchWorkouts();
-  };
+  const routinesMaxed = routines.length >= 5;
 
   if (!ready || !workoutsInitialized || !routinesInitialized) {
     return <WorkoutsSkeleton />;
@@ -128,26 +115,54 @@ export default function WorkoutsPage() {
             <FireIcon className="w-8 h-8 text-amber-400" />
             Entrenamientos
           </h1>
-          <div className="flex items-center gap-2">
-            <Link
-              href="/dashboard/workouts/generate"
-              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors"
-            >
-              <SparklesIcon className="w-5 h-5" />
-              Generar con IA
-            </Link>
-            {tab === 'workouts' && (
-              <button
-                onClick={() => setFormOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl gold-gradient text-black font-bold hover:opacity-90 transition-opacity"
-              >
-                <PlusIcon className="w-5 h-5" />
-                Nuevo
-              </button>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-zinc-400">{routines.length}/5</span>
+            {routinesMaxed ? (
+              <>
+                <button
+                  disabled
+                  title="Alcanzaste el límite de 5 rutinas"
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl gold-gradient text-black font-bold opacity-50 cursor-not-allowed"
+                >
+                  <PlusIcon className="w-5 h-5" />
+                  Crear plan
+                </button>
+                <button
+                  disabled
+                  title="Alcanzaste el límite de 5 rutinas"
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl border border-amber-500/30 text-amber-400 opacity-50 cursor-not-allowed"
+                >
+                  <SparklesIcon className="w-5 h-5" />
+                  Generar con IA
+                </button>
+              </>
+            ) : (
+              <>
+                <Link
+                  href="/dashboard/workouts/create"
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl gold-gradient text-black font-bold hover:opacity-90 transition-opacity"
+                >
+                  <PlusIcon className="w-5 h-5" />
+                  Crear plan
+                </Link>
+                <Link
+                  href="/dashboard/workouts/generate"
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors"
+                >
+                  <SparklesIcon className="w-5 h-5" />
+                  Generar con IA
+                </Link>
+              </>
             )}
           </div>
         </div>
       </FadeIn>
+
+      {activeWorkout && (
+        <FadeIn delay={0.02}>
+          <ResumeWorkoutCard workout={activeWorkout} />
+        </FadeIn>
+      )}
 
       <FadeIn delay={0.05}>
         <div className="flex p-1 rounded-2xl bg-zinc-900/50 border border-zinc-800">
@@ -186,80 +201,30 @@ export default function WorkoutsPage() {
             className="space-y-6"
           >
             <AnimatePresence>
-              {formOpen && (
-                <motion.form
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  style={{ opacity: 0 }}
-                  onSubmit={handleSubmit}
-                  className="glass rounded-3xl p-6 space-y-4 overflow-hidden"
+              {workoutsLoading && workouts.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="flex justify-end"
                 >
-                  <h2 className="text-xl font-bold text-amber-400">
-                    {editing ? "Editar entrenamiento" : "Nuevo entrenamiento"}
-                  </h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <input
-                      placeholder="Nombre"
-                      value={form.name}
-                      onChange={(e) => setForm({ ...form, name: e.target.value })}
-                      className="input"
-                      required
-                    />
-                    <input
-                      placeholder="Duración (min)"
-                      type="number"
-                      value={form.duration_minutes}
-                      onChange={(e) => setForm({ ...form, duration_minutes: e.target.value })}
-                      className="input"
-                      required
-                    />
-                    <input
-                      placeholder="Calorías quemadas"
-                      type="number"
-                      value={form.calories_burned}
-                      onChange={(e) => setForm({ ...form, calories_burned: e.target.value })}
-                      className="input"
-                    />
-                    <input
-                      placeholder="Notas"
-                      value={form.notes}
-                      onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                      className="input"
-                    />
-                  </div>
-                  <div className="flex gap-3">
-                    <button type="submit" className="px-6 py-2 rounded-xl gold-gradient text-black font-bold">
-                      Guardar
-                    </button>
-                    <button type="button" onClick={resetForm} className="px-6 py-2 rounded-xl border border-zinc-600 text-zinc-300 hover:bg-white/5">
-                      Cancelar
-                    </button>
-                  </div>
-                </motion.form>
+                  <span className="w-5 h-5 border-2 border-amber-400/30 border-t-amber-400 rounded-full animate-spin" />
+                </motion.div>
               )}
             </AnimatePresence>
 
-            {workoutsLoading && workouts.length > 0 && (
-              <div className="flex justify-end">
-                <span className="w-5 h-5 border-2 border-amber-400/30 border-t-amber-400 rounded-full animate-spin" />
-              </div>
-            )}
-
             <div className="space-y-4">
-              {workouts.map((w, i) => (
+              {workouts.filter((w) => w.status === 'finished').map((w, i) => (
                 <WorkoutCard
                   key={w.id}
                   workout={w}
                   delay={i * 0.05}
                   expanded={expanded === w.id}
                   onToggle={() => setExpanded(expanded === w.id ? null : w.id)}
-                  onEdit={() => handleEdit(w)}
-                  onDelete={() => handleDelete(w.id)}
                 />
               ))}
-              {workouts.length === 0 && (
-                <p className="text-zinc-500 text-center py-12">No tenes entrenamientos registrados.</p>
+              {workouts.filter((w) => w.status === 'finished').length === 0 && (
+                <p className="text-zinc-500 text-center py-12">No tenes entrenamientos completados.</p>
               )}
             </div>
           </motion.div>
@@ -279,44 +244,156 @@ export default function WorkoutsPage() {
             {routines.length === 0 ? (
               <div className="glass rounded-3xl p-8 text-center space-y-4">
                 <p className="text-zinc-400">No tenes un plan de entrenamiento.</p>
-                <Link
-                  href="/dashboard/workouts/generate"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl gold-gradient text-black font-bold"
-                >
-                  <SparklesIcon className="w-5 h-5" />
-                  Generar con IA
-                </Link>
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                  <Link
+                    href="/dashboard/workouts/create"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl gold-gradient text-black font-bold"
+                  >
+                    <PlusIcon className="w-5 h-5" />
+                    Crear plan manual
+                  </Link>
+                  <Link
+                    href="/dashboard/workouts/generate"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors"
+                  >
+                    <SparklesIcon className="w-5 h-5" />
+                    Generar con IA
+                  </Link>
+                </div>
               </div>
             ) : (
               routines.map((routine) => (
-                <RoutineCard key={routine.id} routine={routine} />
+                <RoutineCard
+                  key={routine.id}
+                  routine={routine}
+                  onStartDay={requestStart}
+                  busy={starting}
+                  onDeleted={() => fetchRoutines()}
+                />
               ))
             )}
           </motion.div>
         )}
       </AnimatePresence>
+
+      {pendingStart && activeWorkout && (
+        <StartSessionModal
+          activeWorkout={activeWorkout}
+          busy={starting}
+          onStartNew={() => startSession(pendingStart.routineId, pendingStart.dayId, true)}
+          onResume={() => router.push(`/dashboard/workouts/session?workoutId=${activeWorkout.id}`)}
+        />
+      )}
     </div>
   );
 }
 
-function RoutineCard({ routine }: { routine: Routine }) {
+function RoutineCard({
+  routine,
+  onStartDay,
+  busy,
+  onDeleted,
+}: {
+  routine: Routine;
+  onStartDay: (routineId: number, dayId: number) => void;
+  busy: boolean;
+  onDeleted: () => void;
+}) {
   const [expanded, setExpanded] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const router = useRouter();
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    setDeleteError(false);
+    try {
+      await deleteRoutine(routine.id!);
+      onDeleted();
+    } catch {
+      setDeleteError(true);
+      onDeleted();
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const sourceBadge = () => {
+    switch (routine.source) {
+      case "ai":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-400 text-xs font-bold">
+            <SparklesIcon className="w-3 h-3" />
+            IA
+          </span>
+        );
+      case "trainer":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 text-xs font-bold">
+            <AcademicCapIcon className="w-3 h-3" />
+            Entrenador
+          </span>
+        );
+      case "self":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-bold">
+            <UserIcon className="w-3 h-3" />
+            Tú
+          </span>
+        );
+      default:
+        return null;
+    }
+  };
 
   return (
     <FadeIn>
       <div className="glass rounded-3xl overflow-hidden">
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="w-full flex items-center justify-between p-5 text-left"
-        >
-          <div>
-            <h3 className="text-lg font-bold text-white">{routine.name}</h3>
+        <div className="flex items-center justify-between p-5">
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="flex-1 text-left"
+          >
+            <div className="flex items-center gap-2">
+              <h3 className="text-lg font-bold text-white">{routine.name}</h3>
+              {sourceBadge()}
+            </div>
             <p className="text-zinc-400 text-sm">
               {routine.focus} · {routine.days_per_week} días/semana · {routine.estimated_duration_minutes} min
             </p>
+          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => router.push(`/dashboard/workouts/create?routineId=${routine.id}`)}
+              className="p-2 rounded-xl hover:bg-white/5 text-zinc-300"
+              title="Editar"
+            >
+              <PencilIcon className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => setConfirmOpen(true)}
+              disabled={deleting}
+              className="p-2 rounded-xl hover:bg-white/5 text-zinc-500 hover:text-red-400 disabled:opacity-50"
+              title="Eliminar"
+            >
+              <TrashIcon className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="p-2 rounded-xl hover:bg-white/5 text-zinc-400"
+            >
+              {expanded ? <ChevronUpIcon className="w-5 h-5" /> : <ChevronDownIcon className="w-5 h-5" />}
+            </button>
           </div>
-          {expanded ? <ChevronUpIcon className="w-5 h-5 text-zinc-400" /> : <ChevronDownIcon className="w-5 h-5 text-zinc-400" />}
-        </button>
+        </div>
+        {deleteError && (
+          <div className="px-5 pb-3">
+            <p className="text-sm text-red-400 bg-red-500/10 rounded-xl px-3 py-2">
+              No se pudo eliminar. Probablemente ya no exista.
+            </p>
+          </div>
+        )}
         <AnimatePresence>
           {expanded && (
             <motion.div
@@ -327,32 +404,51 @@ function RoutineCard({ routine }: { routine: Routine }) {
             >
               <div className="p-5 space-y-3">
                 {routine.days.map((day) => (
-                  <DayRow key={day.id} day={day} routineId={routine.id!} />
+                  <DayRow key={day.id} day={day} routineId={routine.id!} onStart={onStartDay} busy={busy} />
                 ))}
               </div>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
+
+      <ConfirmModal
+        open={confirmOpen}
+        title="Eliminar rutina"
+        message={
+          <>
+            ¿Eliminar <span className="font-bold text-white">«{routine.name}»</span>? Esta acción no
+            se puede deshacer.
+          </>
+        }
+        busy={deleting}
+        onConfirm={() => {
+          handleDelete();
+          setConfirmOpen(false);
+        }}
+        onClose={() => setConfirmOpen(false)}
+      />
     </FadeIn>
   );
 }
 
-function DayRow({ day, routineId }: { day: RoutineDay; routineId: number }) {
-  const router = useRouter();
-  const [starting, setStarting] = useState(false);
+function DayRow({
+  day,
+  routineId,
+  onStart,
+  busy,
+}: {
+  day: RoutineDay;
+  routineId: number;
+  onStart: (routineId: number, dayId: number) => void;
+  busy: boolean;
+}) {
   const todayName = DAY_NAMES[new Date().getDay()];
   const isToday = normalizeDay(day.day_name) === normalizeDay(todayName);
 
-  const handleStart = async () => {
+  const handleStart = () => {
     if (!day.id) return;
-    setStarting(true);
-    try {
-      const workout = await startWorkoutFromRoutineDay(routineId, day.id);
-      router.push(`/dashboard/workouts/session?workoutId=${workout.id}`);
-    } finally {
-      setStarting(false);
-    }
+    onStart(routineId, day.id);
   };
 
   return (
@@ -369,11 +465,11 @@ function DayRow({ day, routineId }: { day: RoutineDay; routineId: number }) {
       </div>
       <button
         onClick={handleStart}
-        disabled={starting}
+        disabled={busy}
         className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl gold-gradient text-black font-bold text-sm hover:opacity-90 disabled:opacity-70 transition-opacity"
       >
         <PlayIcon className="w-4 h-4" />
-        {starting ? 'Preparando...' : 'Empezar'}
+        {busy ? 'Preparando...' : 'Empezar'}
       </button>
     </div>
   );
@@ -384,15 +480,11 @@ function WorkoutCard({
   delay,
   expanded,
   onToggle,
-  onEdit,
-  onDelete,
 }: {
   workout: Workout;
   delay: number;
   expanded: boolean;
   onToggle: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
 }) {
   return (
     <FadeIn delay={delay}>
@@ -405,17 +497,9 @@ function WorkoutCard({
               {workout.calories_burned ? ` · ${workout.calories_burned} kcal` : ""}
             </p>
           </button>
-          <div className="flex items-center gap-2">
-            <button onClick={onEdit} className="p-2 rounded-xl hover:bg-white/5 text-zinc-300">
-              <PencilIcon className="w-5 h-5" />
-            </button>
-            <button onClick={onDelete} className="p-2 rounded-xl hover:bg-red-500/10 text-zinc-300 hover:text-red-400">
-              <TrashIcon className="w-5 h-5" />
-            </button>
-            <button onClick={onToggle} className="p-2 rounded-xl hover:bg-white/5 text-zinc-300">
-              {expanded ? <ChevronUpIcon className="w-5 h-5" /> : <ChevronDownIcon className="w-5 h-5" />}
-            </button>
-          </div>
+          <button onClick={onToggle} className="p-2 rounded-xl hover:bg-white/5 text-zinc-300">
+            {expanded ? <ChevronUpIcon className="w-5 h-5" /> : <ChevronDownIcon className="w-5 h-5" />}
+          </button>
         </div>
         <AnimatePresence>
           {expanded && <ExercisesList workoutId={workout.id} />}
@@ -427,30 +511,10 @@ function WorkoutCard({
 
 function ExercisesList({ workoutId }: { workoutId: number }) {
   const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [form, setForm] = useState({ name: "", sets: "", reps: "", weight: "" });
-
-  const load = () => getExercises(workoutId).then(setExercises);
 
   useEffect(() => {
-    load();
+    getExercises(workoutId).then(setExercises);
   }, [workoutId]);
-
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await createExercise(workoutId, {
-      name: form.name,
-      sets: Number(form.sets),
-      reps: Number(form.reps),
-      weight: form.weight ? Number(form.weight) : null,
-    });
-    setForm({ name: "", sets: "", reps: "", weight: "" });
-    load();
-  };
-
-  const handleDelete = async (id: number) => {
-    await deleteExercise(workoutId, id);
-    load();
-  };
 
   return (
     <motion.div
@@ -466,19 +530,16 @@ function ExercisesList({ workoutId }: { workoutId: number }) {
           <div>
             <p className="text-white font-medium">{ex.name}</p>
             <p className="text-zinc-400 text-sm">{ex.sets} series x {ex.reps} reps{ex.weight ? ` · ${ex.weight} kg` : ""}</p>
+            {ex.set_logs && ex.set_logs.length > 0 && ex.set_logs.some(l => l.completed_at) && (
+              <p className="text-zinc-500 text-xs mt-1">
+                {ex.set_logs.filter(l => l.completed_at).map(l =>
+                  `S${l.set_number}: ${l.reps ?? 0} reps${l.weight != null ? ` × ${l.weight} kg` : ""}`
+                ).join(' · ')}
+              </p>
+            )}
           </div>
-          <button onClick={() => handleDelete(ex.id)} className="p-2 text-zinc-500 hover:text-red-400">
-            <TrashIcon className="w-4 h-4" />
-          </button>
         </div>
       ))}
-      <form onSubmit={handleAdd} className="grid grid-cols-2 md:grid-cols-5 gap-2">
-        <input placeholder="Ejercicio" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input col-span-2" required />
-        <input placeholder="Series" type="number" value={form.sets} onChange={(e) => setForm({ ...form, sets: e.target.value })} className="input" required />
-        <input placeholder="Reps" type="number" value={form.reps} onChange={(e) => setForm({ ...form, reps: e.target.value })} className="input" required />
-        <input placeholder="Peso" type="number" value={form.weight} onChange={(e) => setForm({ ...form, weight: e.target.value })} className="input" />
-        <button type="submit" className="col-span-2 md:col-span-5 py-2 rounded-xl gold-gradient text-black font-bold text-sm">Agregar ejercicio</button>
-      </form>
     </motion.div>
   );
 }

@@ -26,6 +26,7 @@ export default function SessionPage() {
   const [weight, setWeight] = useState("");
   const [completedSets, setCompletedSets] = useState(0);
   const [finishing, setFinishing] = useState(false);
+  const [inputError, setInputError] = useState<string | null>(null);
   const [waterLogged, setWaterLogged] = useState(false);
   const [showExitModal, setShowExitModal] = useState(false);
   const [exiting, setExiting] = useState(false);
@@ -39,10 +40,50 @@ export default function SessionPage() {
     getWorkout(workoutId)
       .then((w) => {
         setWorkout(w);
+
+        if (w.status === "finished") {
+          setPhase("finished");
+          return;
+        }
+
+        let completed = 0;
+        let pending = false;
+        let eIdx = 0;
+        let sIdx = 0;
+        for (let e = 0; e < w.exercises.length; e++) {
+          const logs = w.exercises[e].set_logs ?? [];
+          for (let s = 0; s < w.exercises[e].sets; s++) {
+            const log = logs[s];
+            if (log?.completed_at) {
+              completed++;
+            } else {
+              eIdx = e;
+              sIdx = s;
+              pending = true;
+              break;
+            }
+          }
+          if (pending) break;
+        }
+
+        if (!pending) {
+          setPhase("finished");
+          return;
+        }
+
+        setCompletedSets(completed);
+        setExerciseIndex(eIdx);
+        setSetIndex(sIdx);
         setPhase("intro");
       })
       .catch(() => setError("No se pudo cargar el entrenamiento."));
   }, [workoutId]);
+
+  useEffect(() => {
+    if (phase !== "finished" || !workoutId || workout?.status === "finished") return;
+    getWorkout(workoutId).then(setWorkout).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, workoutId]);
 
   useEffect(() => {
     if (phase !== "work") return;
@@ -88,6 +129,7 @@ export default function SessionPage() {
 
   function handleReady() {
     if (!currentExercise) return;
+    setInputError(null);
     setReps(String(currentExercise.reps || ""));
     setWeight(currentExercise.weight ? String(currentExercise.weight) : "");
     setPhase("input");
@@ -96,14 +138,32 @@ export default function SessionPage() {
   async function handleSaveSet(e: React.FormEvent) {
     e.preventDefault();
     if (!workout || !currentExercise || !currentSet) return;
-    await completeSet(workout.id, currentExercise.id, currentSet.id, {
-      reps: Number(reps),
-      weight: weight ? Number(weight) : null,
-    });
-    setCompletedSets((c) => c + 1);
-    setRestSeconds(currentExercise.rest_seconds);
-    setWaterLogged(false);
-    setPhase("rest");
+
+    const repsNum = parseInt(reps, 10);
+    const weightNum = parseFloat(weight);
+
+    if (isNaN(repsNum) || repsNum < 1) {
+      setInputError("Las repeticiones deben ser un número entero mayor a 0.");
+      return;
+    }
+    if (isNaN(weightNum) || weightNum < 0) {
+      setInputError("El peso debe ser un número válido (mínimo 0).");
+      return;
+    }
+
+    setInputError(null);
+    try {
+      await completeSet(workout.id, currentExercise.id, currentSet.id, {
+        reps: repsNum,
+        weight: weightNum,
+      });
+      setCompletedSets((c) => c + 1);
+      setRestSeconds(currentExercise.rest_seconds);
+      setWaterLogged(false);
+      setPhase("rest");
+    } catch {
+      setInputError("No se pudo guardar la serie. Verificá los datos.");
+    }
   }
 
   async function handleFinish() {
@@ -198,6 +258,7 @@ export default function SessionPage() {
               onRepsChange={setReps}
               onWeightChange={setWeight}
               onSubmit={handleSaveSet}
+              error={inputError}
             />
           )}
           {phase === "rest" && (
@@ -208,7 +269,7 @@ export default function SessionPage() {
             />
           )}
           {phase === "finished" && (
-            <FinishedPhase onFinish={handleFinish} finishing={finishing} />
+            <FinishedPhase workout={workout} onFinish={handleFinish} finishing={finishing} />
           )}
         </div>
       </div>
@@ -284,12 +345,14 @@ function InputPhase({
   onRepsChange,
   onWeightChange,
   onSubmit,
+  error,
 }: {
   reps: string;
   weight: string;
   onRepsChange: (v: string) => void;
   onWeightChange: (v: string) => void;
   onSubmit: (e: React.FormEvent) => void;
+  error?: string | null;
 }) {
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center space-y-6">
@@ -304,7 +367,7 @@ function InputPhase({
               onChange={(e) => onRepsChange(e.target.value)}
               className="input w-full"
               required
-              min={0}
+              min={1}
             />
           </div>
           <div className="text-left">
@@ -315,9 +378,12 @@ function InputPhase({
               value={weight}
               onChange={(e) => onWeightChange(e.target.value)}
               className="input w-full"
+              required
+              min={0}
             />
           </div>
         </div>
+        {error && <p className="text-red-400 text-sm text-left">{error}</p>}
         <button type="submit" className="w-full px-6 py-3 rounded-2xl gold-gradient text-black font-bold hover:opacity-90 transition-opacity">
           Guardar serie y descansar
         </button>
@@ -358,22 +424,38 @@ function RestPhase({
   );
 }
 
-function FinishedPhase({ onFinish, finishing }: { onFinish: () => void; finishing: boolean }) {
+function FinishedPhase({ workout, onFinish, finishing }: { workout: Workout; onFinish: () => void; finishing: boolean }) {
   return (
     <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="text-center space-y-8">
       <div className="w-24 h-24 mx-auto rounded-full gold-gradient flex items-center justify-center">
         <TrophyIcon className="w-12 h-12 text-black" />
       </div>
       <div>
-        <h2 className="text-3xl md:text-4xl font-bold text-white">Entrenamiento completado</h2>
-        <p className="text-zinc-400 mt-2">Buen trabajo. Tu progreso quedo registrado.</p>
+        <h2 className="text-3xl md:text-4xl font-bold text-white">{workout.status === "finished" ? "Entrenamiento completado" : "Entrenamiento listo para cerrar"}</h2>
+        <p className="text-zinc-400 mt-2">Resumen de tu sesión.</p>
       </div>
+
+      <div className="max-h-72 overflow-y-auto space-y-3 text-left max-w-xl mx-auto w-full">
+        {workout.exercises.map((ex) => {
+          const done = (ex.set_logs ?? []).filter((l) => l.completed_at);
+          if (done.length === 0) return null;
+          return (
+            <div key={ex.id} className="bg-zinc-900/60 border border-zinc-800 rounded-xl p-4">
+              <p className="text-white font-bold text-sm">{ex.name}</p>
+              <p className="text-zinc-400 text-xs mt-1">
+                {done.map((l) => `S${l.set_number}: ${l.reps ?? 0} reps${l.weight != null ? ` × ${l.weight} kg` : ""}`).join(" · ")}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
       <button
         onClick={onFinish}
-        disabled={finishing}
+        disabled={finishing || workout.status === "finished"}
         className="px-10 py-4 rounded-2xl gold-gradient text-black font-bold text-lg hover:opacity-90 disabled:opacity-70 transition-opacity"
       >
-        {finishing ? "Guardando..." : "Finalizar"}
+        {workout.status === "finished" ? "Guardado" : finishing ? "Guardando..." : "Finalizar"}
       </button>
     </motion.div>
   );

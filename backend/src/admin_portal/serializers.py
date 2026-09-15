@@ -1,8 +1,27 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from gyms.serializers import GymSerializer
+from gyms.models import GymMembership
+from accounts.serializers import RegisterSerializer
 
 User = get_user_model()
+
+
+class GymAdminCreateSerializer(RegisterSerializer):
+    def create(self, validated_data, gym):
+        user = User.objects.create_user(
+            username=validated_data['username'],
+            email=validated_data.get('email', ''),
+            password=validated_data['password'],
+            role='gym_admin',
+            managed_gym=gym,
+        )
+        GymMembership.objects.get_or_create(
+            user=user,
+            gym=gym,
+            defaults={'role': GymMembership.Role.ADMIN},
+        )
+        return user
 
 
 class AdminUserSerializer(serializers.ModelSerializer):

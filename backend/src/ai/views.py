@@ -11,8 +11,33 @@ from config.permissions import IsStandardUser
 from .services import chat_with_trainer, generate_routine
 from routines.models import Routine, RoutineDay, RoutineExercise
 from routines.serializers import RoutineSerializer
+from workouts.models import Workout
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__) 
+
+
+def workout_history_summary(user, limit=4, max_chars=1500):
+    workouts = (
+        Workout.objects.filter(user=user, status=Workout.Status.FINISHED)
+        .prefetch_related('exercises__set_instances')
+        .order_by('-finished_at')[:limit]
+    )
+    lines = []
+    for workout in workouts:
+        when = (workout.finished_at or workout.date).date()
+        entries = []
+        for exercise in workout.exercises.all():
+            done = [s for s in exercise.set_instances.all() if s.completed_at]
+            if not done:
+                continue
+            sets_desc = ', '.join(
+                f"{s.reps or 0} reps" + (f' x {s.weight} kg' if s.weight is not None else '')
+                for s in done
+            )
+            entries.append(f"{exercise.name} ({sets_desc})")
+        if entries:
+            lines.append(f"- {when} «{workout.name}»: " + '; '.join(entries))
+    return '\n'.join(lines)[:max_chars]
 
 
 @method_decorator(ratelimit(key='user', rate='20/m', method='POST', block=True), name='post')
@@ -25,7 +50,7 @@ class ChatView(APIView):
             return Response({'detail': 'messages es requerido y debe ser una lista.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            reply = chat_with_trainer(messages)
+            reply = chat_with_trainer(messages, workout_history_summary(request.user))
             return Response({'reply': reply})
         except RuntimeError as exc:
             logger.error('Chat service error: %s', exc)
@@ -56,18 +81,30 @@ class GenerateRoutineView(APIView):
             'injuries': preferences.get('injuries') or 'ninguna',
         }
 
+        if Routine.objects.filter(user=request.user).count() >= Routine.MAX_PER_USER:
+            return Response(
+                {'detail': f'Alcanzaste el límite de {Routine.MAX_PER_USER} rutinas. Eliminá una para crear otra.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
             result = generate_routine(profile_data, preferences)
             routine_data = result['routine']
 
             with transaction.atomic():
+                locked_count = sum(1 for _ in Routine.objects.filter(user=request.user).select_for_update().values_list('id', flat=True))
+                if locked_count >= Routine.MAX_PER_USER:
+                    return Response(
+                        {'detail': f'Alcanzaste el límite de {Routine.MAX_PER_USER} rutinas. Eliminá una para crear otra.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 routine = Routine.objects.create(
                     user=request.user,
                     name=routine_data.get('name', 'Rutina IA'),
                     focus=routine_data.get('focus', ''),
                     days_per_week=routine_data.get('days_per_week', preferences['days_per_week']),
                     estimated_duration_minutes=routine_data.get('estimated_duration_minutes', preferences['minutes_per_session']),
-                    generated_by_ai=True,
+                    source=Routine.Source.AI,
                 )
                 for day_data in routine_data.get('days', []):
                     day = RoutineDay.objects.create(

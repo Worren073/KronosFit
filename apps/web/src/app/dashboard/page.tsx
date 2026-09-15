@@ -33,6 +33,9 @@ import { GENDER_LABELS } from "@/lib/gender";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { FadeIn } from "@/components/ui/FadeIn";
 import { useMinimumSkeleton } from "@/hooks/useMinimumSkeleton";
+import { useActiveWorkout } from "@/hooks/useActiveWorkout";
+import { ResumeWorkoutCard } from "@/components/workouts/ResumeWorkoutCard";
+import { StartSessionModal } from "@/components/workouts/StartSessionModal";
 import type { User, Routine } from "@/lib/types";
 
 const EXPERIENCE_LABELS = Object.fromEntries(EXPERIENCE_LEVELS.map((e) => [e.key, e.label]));
@@ -320,6 +323,8 @@ function normalizeDay(name: string) {
 function TrainingPlanCard({ routines, loading }: { routines: Routine[]; loading: boolean }) {
   const router = useRouter();
   const [starting, setStarting] = useState(false);
+  const [pendingStart, setPendingStart] = useState<{ routineId: number; dayId: number } | null>(null);
+  const { activeWorkout } = useActiveWorkout();
 
   if (loading) {
     return <Skeleton className="h-24 w-full rounded-3xl" />;
@@ -355,56 +360,88 @@ function TrainingPlanCard({ routines, loading }: { routines: Routine[]; loading:
     (d) => normalizeDay(d.day_name) === normalizeDay(todayName)
   );
 
-  if (!todayDay) {
-    return (
-      <FadeIn>
-        <div className="glass rounded-3xl p-6 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center">
-            <BoltIcon className="w-6 h-6 text-amber-400" />
-          </div>
-          <div>
-            <p className="text-sm font-bold text-zinc-400 uppercase">Plan de hoy</p>
-            <h2 className="text-lg font-bold text-white">Hoy es {todayName} — descanso activo</h2>
-          </div>
-        </div>
-      </FadeIn>
-    );
-  }
-
-  const handleStart = async () => {
-    if (!routine.id || !todayDay.id) return;
+  const startSession = async (routineId: number, dayId: number, force = false) => {
     setStarting(true);
     try {
-      const workout = await startWorkoutFromRoutineDay(routine.id, todayDay.id);
+      const workout = await startWorkoutFromRoutineDay(routineId, dayId, force);
       router.push(`/dashboard/workouts/session?workoutId=${workout.id}`);
     } finally {
       setStarting(false);
+      setPendingStart(null);
     }
   };
 
+  const handleStart = () => {
+    if (!routine.id || !todayDay?.id) return;
+    if (activeWorkout) {
+      setPendingStart({ routineId: routine.id, dayId: todayDay.id });
+    } else {
+      startSession(routine.id, todayDay.id);
+    }
+  };
+
+  if (!todayDay) {
+    return (
+      <>
+        {activeWorkout && (
+          <FadeIn>
+            <ResumeWorkoutCard workout={activeWorkout} />
+          </FadeIn>
+        )}
+        <FadeIn>
+          <div className="glass rounded-3xl p-6 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center">
+              <BoltIcon className="w-6 h-6 text-amber-400" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-zinc-400 uppercase">Plan de hoy</p>
+              <h2 className="text-lg font-bold text-white">Hoy es {todayName} — descanso activo</h2>
+            </div>
+          </div>
+        </FadeIn>
+      </>
+    );
+  }
+
   return (
-    <FadeIn>
-      <div className="glass rounded-3xl p-6 gold-gradient text-black flex flex-col md:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="w-14 h-14 md:w-12 md:h-12 rounded-full bg-black/20 flex items-center justify-center">
-            <BoltIcon className="w-8 h-8 md:w-7 md:h-7" />
+    <>
+      {activeWorkout && (
+        <FadeIn>
+          <ResumeWorkoutCard workout={activeWorkout} />
+        </FadeIn>
+      )}
+      <FadeIn>
+        <div className="glass rounded-3xl p-6 gold-gradient text-black flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 md:w-12 md:h-12 rounded-full bg-black/20 flex items-center justify-center">
+              <BoltIcon className="w-8 h-8 md:w-7 md:h-7" />
+            </div>
+            <div>
+              <p className="text-sm font-bold uppercase opacity-80">Plan de hoy</p>
+              <h2 className="text-xl md:text-2xl font-bold">
+                Hoy es {todayDay.day_name} — {todayDay.muscle_groups}
+              </h2>
+            </div>
           </div>
-          <div>
-            <p className="text-sm font-bold uppercase opacity-80">Plan de hoy</p>
-            <h2 className="text-xl md:text-2xl font-bold">
-              Hoy es {todayDay.day_name} — {todayDay.muscle_groups}
-            </h2>
-          </div>
+          <button
+            onClick={handleStart}
+            disabled={starting}
+            className="px-6 py-3 rounded-xl bg-black text-white font-bold text-sm hover:bg-zinc-900 disabled:opacity-70 transition-colors"
+          >
+            {starting ? 'Preparando...' : 'Empezar entrenamiento'}
+          </button>
         </div>
-        <button
-          onClick={handleStart}
-          disabled={starting}
-          className="px-6 py-3 rounded-xl bg-black text-white font-bold text-sm hover:bg-zinc-900 disabled:opacity-70 transition-colors"
-        >
-          {starting ? 'Preparando...' : 'Empezar entrenamiento'}
-        </button>
-      </div>
-    </FadeIn>
+      </FadeIn>
+
+      {pendingStart && activeWorkout && (
+        <StartSessionModal
+          activeWorkout={activeWorkout}
+          busy={starting}
+          onStartNew={() => startSession(pendingStart.routineId, pendingStart.dayId, true)}
+          onResume={() => router.push(`/dashboard/workouts/session?workoutId=${activeWorkout.id}`)}
+        />
+      )}
+    </>
   );
 }
 

@@ -25,12 +25,22 @@ describe("getPortalNavItems", () => {
     expect(hrefs("trainer")).toContain("/dashboard/gyms");
   });
 
-  it("gym_admin solo ve Gimnasio y Perfil", () => {
-    expect(hrefs("gym_admin")).toEqual(["/dashboard/gyms", "/dashboard/profile"]);
+  it("gym_admin ve Gimnasio, Atletas, Eventos y Perfil", () => {
+    expect(hrefs("gym_admin")).toEqual([
+      "/dashboard/gyms",
+      "/dashboard/gyms/athletes",
+      "/dashboard/gyms/events",
+      "/dashboard/profile",
+    ]);
   });
 
-  it("superadmin solo ve Admin y Perfil", () => {
-    expect(hrefs("user", true)).toEqual(["/dashboard/superadmin", "/dashboard/profile"]);
+  it("superadmin ve los 3 módulos del portal y Perfil", () => {
+    expect(hrefs("user", true)).toEqual([
+      "/dashboard/superadmin",
+      "/dashboard/superadmin/users",
+      "/dashboard/superadmin/gyms",
+      "/dashboard/profile",
+    ]);
   });
 });
 
@@ -57,6 +67,8 @@ describe("canAccess", () => {
   it("superadmin solo accede a su portal y perfil", () => {
     const superuser = makeUser("user", true);
     expect(canAccess("/dashboard/superadmin", superuser)).toBe(true);
+    expect(canAccess("/dashboard/superadmin/users", superuser)).toBe(true);
+    expect(canAccess("/dashboard/superadmin/gyms", superuser)).toBe(true);
     expect(canAccess("/dashboard/profile", superuser)).toBe(true);
     expect(canAccess("/dashboard", superuser)).toBe(false);
     expect(canAccess("/dashboard/gyms", superuser)).toBe(false);

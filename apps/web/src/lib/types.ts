@@ -31,6 +31,8 @@ export interface Workout {
   duration_minutes: number;
   calories_burned: number | null;
   notes: string;
+  status: 'in_progress' | 'finished';
+  finished_at: string | null;
   exercises: Exercise[];
 }
 
@@ -303,7 +305,7 @@ export interface Routine {
   focus: string;
   days_per_week: number;
   estimated_duration_minutes: number;
-  generated_by_ai?: boolean;
+  source?: 'ai' | 'self' | 'trainer';
   created_at?: string;
   days: RoutineDay[];
 }

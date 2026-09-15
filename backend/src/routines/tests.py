@@ -115,13 +115,13 @@ def test_cannot_access_other_users_routine(authenticated_client):
 def test_routines_list_is_paginated(authenticated_client):
     client, user = authenticated_client
     for i in range(25):
-        client.post('/api/routines/', {
-            'name': f'Rutina {i}',
-            'focus': 'Fuerza',
-            'days_per_week': 3,
-            'estimated_duration_minutes': 45,
-            'days': [],
-        }, content_type='application/json')
+        Routine.objects.create(
+            user=user,
+            name=f'Rutina {i}',
+            focus='Fuerza',
+            days_per_week=3,
+            estimated_duration_minutes=45,
+        )
 
     response = client.get('/api/routines/')
     assert response.status_code == 200
@@ -129,6 +129,45 @@ def test_routines_list_is_paginated(authenticated_client):
     assert data['count'] == 25
     assert len(data['results']) == 20
     assert data['next'] is not None
+
+
+@pytest.mark.django_db
+def test_routine_limit_blocks_sixth_creation(authenticated_client):
+    client, user = authenticated_client
+    for i in range(5):
+        Routine.objects.create(
+            user=user,
+            name=f'Rutina {i}',
+            focus='Fuerza',
+            days_per_week=3,
+            estimated_duration_minutes=45,
+        )
+
+    response = client.post('/api/routines/', {
+        'name': 'Sexta rutina',
+        'focus': 'Fuerza',
+        'days_per_week': 3,
+        'estimated_duration_minutes': 45,
+        'days': [],
+    }, content_type='application/json')
+    assert response.status_code == 400
+    assert 'límite de 5 rutinas' in response.json()['detail']
+    assert Routine.objects.filter(user=user).count() == 5
+
+
+@pytest.mark.django_db
+def test_routine_limit_allows_up_to_five(authenticated_client):
+    client, user = authenticated_client
+    for i in range(5):
+        response = client.post('/api/routines/', {
+            'name': f'Rutina {i}',
+            'focus': 'Fuerza',
+            'days_per_week': 3,
+            'estimated_duration_minutes': 45,
+            'days': [],
+        }, content_type='application/json')
+        assert response.status_code == 201
+    assert Routine.objects.filter(user=user).count() == 5
 
 
 @pytest.mark.django_db

@@ -217,6 +217,21 @@ def test_admin_cannot_update_own_role(authenticated_client, gym):
 
 
 @pytest.mark.django_db
+def test_admin_cannot_assign_admin_role(authenticated_client, gym):
+    client, user = authenticated_client
+    GymMembership.objects.create(user=user, gym=gym, role='admin')
+    other = User.objects.create_user(username='other', password='Password123')
+    membership = GymMembership.objects.create(user=other, gym=gym, role='member')
+
+    response = client.patch(f'/api/gyms/{gym.slug}/members/{membership.id}/', {
+        'role': 'admin',
+    }, content_type='application/json')
+    assert response.status_code == 403
+    membership.refresh_from_db()
+    assert membership.role == 'member'
+
+
+@pytest.mark.django_db
 def test_non_numeric_membership_id_returns_404(authenticated_client, gym):
     client, user = authenticated_client
     gym.memberships.create(user=user, role='admin')

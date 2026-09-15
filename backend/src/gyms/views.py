@@ -253,6 +253,8 @@ class GymViewSet(viewsets.ModelViewSet):
                     {'role': 'Rol inválido.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            if role == GymMembership.Role.ADMIN and not request.user.is_superuser:
+                raise PermissionDenied('Solo el superadministrador puede asignar administradores.')
             membership.role = role
             if role != GymMembership.Role.TRAINER:
                 membership.assigned_trainer = None

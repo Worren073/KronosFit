@@ -132,32 +132,12 @@ export async function getWorkout(id: number): Promise<Workout> {
   return apiFetch(`workouts/${id}/`);
 }
 
-export async function createWorkout(data: Partial<Workout>): Promise<Workout> {
-  return apiFetch('workouts/', { method: 'POST', body: JSON.stringify(data) });
-}
-
-export async function updateWorkout(id: number, data: Partial<Workout>): Promise<Workout> {
-  return apiFetch(`workouts/${id}/`, { method: 'PUT', body: JSON.stringify(data) });
-}
-
 export async function deleteWorkout(id: number) {
   return apiFetch(`workouts/${id}/`, { method: 'DELETE' });
 }
 
 export async function getExercises(workoutId: number): Promise<Exercise[]> {
   return unwrapPagination<Exercise>(await apiFetch(`workouts/${workoutId}/exercises/`));
-}
-
-export async function createExercise(workoutId: number, data: Partial<Exercise>): Promise<Exercise> {
-  return apiFetch(`workouts/${workoutId}/exercises/`, { method: 'POST', body: JSON.stringify(data) });
-}
-
-export async function updateExercise(workoutId: number, id: number, data: Partial<Exercise>): Promise<Exercise> {
-  return apiFetch(`workouts/${workoutId}/exercises/${id}/`, { method: 'PUT', body: JSON.stringify(data) });
-}
-
-export async function deleteExercise(workoutId: number, id: number) {
-  return apiFetch(`workouts/${workoutId}/exercises/${id}/`, { method: 'DELETE' });
 }
 
 function withDateParams(base: string, params?: { date_from?: string; date_to?: string; date?: string }): string {
@@ -233,15 +213,32 @@ export async function saveRoutine(data: Routine): Promise<Routine> {
   return apiFetch('routines/', { method: 'POST', body: JSON.stringify(data) });
 }
 
+export async function updateRoutine(id: number, data: Routine): Promise<Routine> {
+  return apiFetch(`routines/${id}/`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function deleteRoutine(id: number): Promise<void> {
+  await apiFetch(`routines/${id}/`, { method: 'DELETE' });
+}
+
 export async function getRoutines(): Promise<Routine[]> {
   return unwrapPagination<Routine>(await apiFetch('routines/'));
 }
 
-export async function startWorkoutFromRoutineDay(routineId: number, dayId: number): Promise<Workout> {
+export async function getRoutine(id: number): Promise<Routine> {
+  return apiFetch(`routines/${id}/`);
+}
+
+export async function startWorkoutFromRoutineDay(routineId: number, dayId: number, force = false): Promise<Workout> {
   return apiFetch('workouts/start-from-routine-day/', {
     method: 'POST',
-    body: JSON.stringify({ routine_id: routineId, day_id: dayId }),
+    body: JSON.stringify({ routine_id: routineId, day_id: dayId, force }),
   });
+}
+
+export async function getActiveWorkout(): Promise<Workout | null> {
+  const data = await apiFetch('workouts/active/');
+  return data.active ?? null;
 }
 
 export async function getGyms(): Promise<Gym[]> {
@@ -364,6 +361,22 @@ export async function updateAdminUser(id: number, data: Partial<AdminUser>): Pro
 
 export async function getAdminGyms(): Promise<AdminGym[]> {
   return unwrapPagination<AdminGym>(await apiFetch('admin/gyms/'));
+}
+
+export interface AdminGymCreatePayload {
+  name: string;
+  address?: string;
+  phone?: string;
+  gym_admin_id?: number;
+  new_gym_admin?: { username: string; email: string; password: string };
+}
+
+export async function createAdminGym(data: AdminGymCreatePayload): Promise<AdminGym> {
+  return apiFetch('admin/gyms/', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function deleteAdminGym(slug: string): Promise<void> {
+  await apiFetch(`admin/gyms/${slug}/`, { method: 'DELETE' });
 }
 
 export async function updateAdminGym(slug: string, data: Partial<AdminGym>): Promise<AdminGym> {

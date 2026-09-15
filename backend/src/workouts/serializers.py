@@ -22,5 +22,5 @@ class WorkoutSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Workout
-        fields = ['id', 'name', 'date', 'duration_minutes', 'calories_burned', 'notes', 'exercises', 'created_by']
+        fields = ['id', 'name', 'date', 'duration_minutes', 'calories_burned', 'notes', 'status', 'finished_at', 'exercises', 'created_by']
         read_only_fields = ['created_by']
