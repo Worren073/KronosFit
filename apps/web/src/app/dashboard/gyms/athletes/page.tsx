@@ -25,6 +25,7 @@ import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { useMinimumSkeleton } from "@/hooks/useMinimumSkeleton";
 import { useDashboardStore } from "@/stores/dashboardStore";
 import GymStats from "@/components/dashboard/gyms/GymStats";
+import { RenewSubModal } from "@/components/dashboard/gyms/RenewSubModal";
 import type { GymAdminDashboard, GymMembership, GymPlan, MemberSummary } from "@/lib/types";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -43,6 +44,8 @@ interface PendingAction {
   title: string;
   message: React.ReactNode;
   action: () => Promise<void>;
+  danger?: boolean;
+  confirmLabel?: string;
 }
 
 export default function GymAthletesPage() {
@@ -62,6 +65,7 @@ export default function GymAthletesPage() {
   const [planForm, setPlanForm] = useState({ name: "", price: "", duration_days: "30" });
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<PendingAction | null>(null);
+  const [renewMember, setRenewMember] = useState<MemberSummary | null>(null);
 
   useEffect(() => {
     if (!userInitialized) fetchUser().catch(() => {});
@@ -123,34 +127,40 @@ export default function GymAthletesPage() {
     }
   };
 
-  const renewSub = async (id: number, hasPlan: boolean) => {
-    if (!slug) return;
-    setBusy(true);
-    setError("");
+  const handleRenewMember = async () => {
+    if (!slug || !renewMember?.subscription) return;
+    notify("Mensualidad renovada.");
+    setRenewMember(null);
     try {
-      await updateGymSubscription(slug, id, "renew", hasPlan ? undefined : 30);
-      notify("Mensualidad renovada.");
       await refreshDashboard();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo renovar");
-    } finally {
-      setBusy(false);
+    } catch {
+      // el error se muestra en la página
     }
   };
 
-  const cancelSub = async (id: number) => {
+const doCancelSub = async (id: number) => {
     if (!slug) return;
     setBusy(true);
     setError("");
     try {
       await updateGymSubscription(slug, id, "cancel");
-      notify("Mensualidad cancelada.");
+      notify("Mensualidad revocada.");
       await refreshDashboard();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo cancelar");
+      setError(err instanceof Error ? err.message : "No se pudo revocar la mensualidad");
     } finally {
       setBusy(false);
     }
+  };
+
+  const requestCancelSub = (id: number) => {
+    setConfirm({
+      title: "Revocar plan",
+      message: "¿Está seguro de revocar el plan de este atleta? Perderá el acceso inmediatamente.",
+      danger: true,
+      confirmLabel: "Revocar",
+      action: () => doCancelSub(id),
+    });
   };
 
   const kick = async (membershipId: number) => {
@@ -245,6 +255,11 @@ export default function GymAthletesPage() {
   const members = dashboard?.members ?? [];
   const trainers = members.filter((m) => m.role === "trainer");
   const athletes = members.filter((m) => m.role === "member");
+  const eligibleForSub = athletes.filter(
+    (a) =>
+      !a.subscription ||
+      (a.subscription.status !== "active" && a.subscription.status !== "expired")
+  );
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -332,7 +347,7 @@ export default function GymAthletesPage() {
               required
             >
               <option value="">Seleccionar atleta</option>
-              {athletes.map((m) => (
+              {eligibleForSub.map((m) => (
                 <option key={m.membership_id} value={m.user.id}>
                   {m.user.first_name || m.user.username}
                 </option>
@@ -379,22 +394,35 @@ export default function GymAthletesPage() {
                         {ROLE_LABELS[member.role] || member.role}
                       </span>
                     </p>
-                    {sub ? (
-                      <div className="mt-2 max-w-xs">
-                        <div className="flex items-center justify-between text-xs mb-1">
-                          <span className="text-zinc-400">{sub.plan?.name || "Plan libre"}</span>
-                          <span className="text-amber-400 font-bold">{sub.days_remaining} días</span>
-                        </div>
-                        <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
-                          <div className="h-full gold-gradient rounded-full transition-all" style={{ width: `${progress}%` }} />
-                        </div>
-                        <p className="text-[11px] text-zinc-500 mt-1">
-                          Vence el {new Date(sub.end_date).toLocaleDateString()}
-                        </p>
+                  {sub?.status === "active" ? (
+                    <div className="mt-2 max-w-xs">
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-zinc-400">{sub.plan?.name || "Plan libre"}</span>
+                        <span className="text-amber-400 font-bold">{sub.days_remaining} días</span>
                       </div>
-                    ) : (
-                      <p className="text-xs text-zinc-500 mt-1">Sin plan</p>
-                    )}
+                      <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                        <div className="h-full gold-gradient rounded-full transition-all" style={{ width: `${progress}%` }} />
+                      </div>
+                      <p className="text-[11px] text-zinc-500 mt-1">
+                        Vence el {new Date(sub.end_date).toLocaleDateString()}
+                      </p>
+                    </div>
+                  ) : sub?.status === "expired" ? (
+                    <div className="mt-2 max-w-xs">
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-zinc-400 line-through">{sub.plan?.name || "Plan libre"}</span>
+                        <span className="text-red-400 font-bold">Vencido</span>
+                      </div>
+                      <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-red-500/80 rounded-full" />
+                      </div>
+                      <p className="text-[11px] text-red-400/70 mt-1">
+                        Venció el {new Date(sub.end_date).toLocaleDateString()}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-zinc-500 mt-1">Sin plan</p>
+                  )}
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
                     {member.user.id !== user.id && (
@@ -408,12 +436,15 @@ export default function GymAthletesPage() {
                         ))}
                       </select>
                     )}
-                    {sub?.status === "active" && (
+                    {(sub?.status === "active" || sub?.status === "expired") && (
                       <>
-                        <button onClick={() => cancelSub(sub.id)} className="px-3 py-2 rounded-xl border border-zinc-600 text-zinc-300 text-xs hover:text-yellow-400">
-                          Cancelar
+                        <button
+                          onClick={() => requestCancelSub(sub.id)}
+                          className="px-3 py-2 rounded-xl border border-zinc-600 text-zinc-300 text-xs hover:text-yellow-400"
+                        >
+                          Revocar
                         </button>
-                        <button onClick={() => renewSub(sub.id, Boolean(sub.plan))} className="px-3 py-2 rounded-xl border border-zinc-600 text-zinc-300 text-xs hover:text-green-400">
+                        <button onClick={() => setRenewMember(member)} className="px-3 py-2 rounded-xl border border-zinc-600 text-zinc-300 text-xs hover:text-green-400">
                           Renovar
                         </button>
                       </>
@@ -471,6 +502,17 @@ export default function GymAthletesPage() {
         onConfirm={runConfirm}
         onClose={() => setConfirm(null)}
       />
+
+      {renewMember?.subscription && (
+        <RenewSubModal
+          open={renewMember !== null}
+          slug={slug}
+          plans={plans}
+          member={renewMember}
+          onClose={() => setRenewMember(null)}
+          onRenewed={handleRenewMember}
+        />
+      )}
     </div>
   );
 }

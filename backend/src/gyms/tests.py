@@ -544,6 +544,65 @@ def test_renew_and_cancel_subscription(authenticated_client, gym):
 
 
 @pytest.mark.django_db
+def test_renew_changes_plan_with_custom_duration(authenticated_client, gym):
+    client, user = authenticated_client
+    gym.memberships.create(user=user, role='admin')
+    athlete = User.objects.create_user(username='athlete', password='Password123')
+    gym.memberships.create(user=athlete, role='member')
+    old_plan = GymPlan.objects.create(gym=gym, name='Mensual', duration_days=30, price='30.00')
+    new_plan = GymPlan.objects.create(gym=gym, name='Trimestral', duration_days=90, price='75.00')
+    sub = GymSubscription.objects.create(
+        gym=gym, user=athlete, plan=old_plan,
+        start_date=date.today(), end_date=date.today() + timedelta(days=10),
+    )
+
+    response = client.patch(f'/api/gyms/{gym.slug}/subscriptions/{sub.id}/', {
+        'action': 'renew', 'plan_id': new_plan.id, 'duration_days': 180,
+    }, content_type='application/json')
+    assert response.status_code == 200
+    sub.refresh_from_db()
+    assert sub.plan_id == new_plan.id
+    assert sub.status == 'active'
+    assert sub.end_date == date.today() + timedelta(days=190)
+
+
+@pytest.mark.django_db
+def test_renew_uses_plan_duration_when_not_provided(authenticated_client, gym):
+    client, user = authenticated_client
+    gym.memberships.create(user=user, role='admin')
+    plan = GymPlan.objects.create(gym=gym, name='Trimestral', duration_days=90, price='75.00')
+    sub = GymSubscription.objects.create(
+        gym=gym, user=user,
+        start_date=date.today(), end_date=date.today() + timedelta(days=5),
+    )
+
+    response = client.patch(f'/api/gyms/{gym.slug}/subscriptions/{sub.id}/', {
+        'action': 'renew', 'plan_id': plan.id,
+    }, content_type='application/json')
+    assert response.status_code == 200
+    sub.refresh_from_db()
+    assert sub.plan_id == plan.id
+    assert sub.end_date == date.today() + timedelta(days=95)
+
+
+@pytest.mark.django_db
+def test_renew_invalid_plan_returns_400(authenticated_client, gym):
+    client, user = authenticated_client
+    gym.memberships.create(user=user, role='admin')
+    sub = GymSubscription.objects.create(
+        gym=gym, user=user,
+        start_date=date.today(), end_date=date.today() + timedelta(days=30),
+    )
+
+    response = client.patch(f'/api/gyms/{gym.slug}/subscriptions/{sub.id}/', {
+        'action': 'renew', 'plan_id': 9999,
+    }, content_type='application/json')
+    assert response.status_code == 400
+    sub.refresh_from_db()
+    assert sub.plan is None
+
+
+@pytest.mark.django_db
 def test_kick_member_cancels_subscription(authenticated_client, gym):
     client, user = authenticated_client
     gym.memberships.create(user=user, role='admin')

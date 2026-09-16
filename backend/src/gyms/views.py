@@ -387,6 +387,12 @@ class GymViewSet(viewsets.ModelViewSet):
         tomorrow = today + timedelta(days=1)
 
         subs = list(gym.subscriptions.select_related('user', 'user__profile', 'plan'))
+        # Lazy-EXPIRED: sin Celery, el dashboard persiste los vencidos
+        GymSubscription.objects.filter(
+            gym=gym,
+            status=GymSubscription.Status.ACTIVE,
+            end_date__lt=today,
+        ).update(status=GymSubscription.Status.EXPIRED)
         active_subs = [
             s for s in subs
             if s.status == GymSubscription.Status.ACTIVE and s.end_date >= today
@@ -408,7 +414,16 @@ class GymViewSet(viewsets.ModelViewSet):
 
         member_list = []
         for m in members:
-            sub = next((s for s in subs if s.user_id == m.user_id and s.end_date >= today), None)
+            m_subs = [s for s in subs if s.user_id == m.user_id]
+            sub = next(
+                (s for s in m_subs if s.status == GymSubscription.Status.ACTIVE and s.end_date >= today),
+                None,
+            )
+            if sub is None:
+                sub = next(
+                    (s for s in m_subs if s.status == GymSubscription.Status.EXPIRED),
+                    None,
+                )
             member_list.append({
                 'membership_id': m.id,
                 'role': m.role,
@@ -518,10 +533,24 @@ class GymViewSet(viewsets.ModelViewSet):
             today = date.today()
             if subscription.status == GymSubscription.Status.CANCELLED:
                 raise PermissionDenied('No podés renovar una mensualidad cancelada.')
-            plan = subscription.plan
+
+            reference_plan = subscription.plan
+            plan_id = request.data.get('plan_id')
+            if plan_id not in (None, ''):
+                try:
+                    reference_plan = GymPlan.objects.get(
+                        pk=int(plan_id), gym=gym, is_active=True
+                    )
+                except (TypeError, ValueError, GymPlan.DoesNotExist):
+                    return Response(
+                        {'plan_id': 'El plan seleccionado no es válido.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                subscription.plan = reference_plan
+
             duration_days = request.data.get('duration_days')
-            if duration_days is None and plan:
-                duration_days = plan.duration_days
+            if duration_days is None and reference_plan:
+                duration_days = reference_plan.duration_days
             if not duration_days:
                 return Response(
                     {'detail': 'Indicá la duración en días para renovar.'},

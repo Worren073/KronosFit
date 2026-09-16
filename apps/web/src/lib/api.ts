@@ -306,11 +306,16 @@ export async function updateGymSubscription(
   slug: string,
   subscriptionId: number,
   action: 'renew' | 'cancel',
-  duration_days?: number
+  duration_days?: number,
+  plan_id?: number | null
 ): Promise<GymSubscription> {
   return apiFetch(`gyms/${slug}/subscriptions/${subscriptionId}/`, {
     method: 'PATCH',
-    body: JSON.stringify({ action, ...(duration_days ? { duration_days } : {}) }),
+    body: JSON.stringify({
+      action,
+      ...(duration_days ? { duration_days } : {}),
+      ...(plan_id !== undefined && plan_id !== null ? { plan_id } : {}),
+    }),
   });
 }
 
